@@ -1,0 +1,334 @@
+﻿"use client";
+import { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Logo from "@/components/Logo";
+import Globe from "@/components/Globe";
+import { getMe, getMessages, sendMessage } from "@/lib/api"
+
+export default function BuddyPage() {
+  const router = useRouter();
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [pairs, setPairs] = useState([]);
+  const [pendingReqs, setPendingReqs] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
+  const [msg, setMsg] = useState("");
+  const [onlineCount] = useState(() => Math.floor(Math.random() * 12) + 8);
+  const [chatPartner, setChatPartner] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [sending, setSending] = useState(false);
+  const [filter, setFilter] = useState("all");
+  const [refreshing, setRefreshing] = useState(false);
+  const [showPendingModal, setShowPendingModal] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const chatMessagesRef = useRef([]);
+  const chatBoxRef = useRef(null);
+
+  useEffect(() => {
+    getMe().then(d => { if (!d.user) { router.push("/login"); return; } setUser(d.user); load(); }).catch(() => router.push("/login"));
+  }, []);
+
+  useEffect(() => {
+    const withUser = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("with") : null;
+    if (withUser && allUsers.length > 0 && user) {
+      const partner = allUsers.find(u => u.id === withUser);
+      if (partner) openChat(partner);
+    }
+  }, [allUsers, user]);
+
+  const load = async () => {
+    try {
+      const token = localStorage.getItem("token");
+      const res = await fetch("/api/pair", { headers: { "Authorization": "Bearer " + token } });
+      const d = await res.json();
+      setPairs(d.pairs || []);
+      setPendingReqs(d.pendingRequests || []);
+      setAllUsers(d.allUsers || []);
+    } catch {}
+    setLoading(false);
+  };
+
+  const showMsg = (text) => { setMsg(text); setTimeout(() => setMsg(""), 3000); };
+
+  const sendPair = async (targetId) => {
+    try {
+      const token = localStorage.getItem("token");
+      await fetch("/api/pair", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token }, body: JSON.stringify({ targetUserId: targetId, action: "send" }) });
+      showMsg("💌 配对请求已发送！");
+      load();
+    } catch { showMsg("发送失败"); }
+  };
+
+  const respondPair = async (fromId, action) => {
+    try {
+      const token = localStorage.getItem("token");
+      await fetch("/api/pair", { method: "POST", headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token }, body: JSON.stringify({ targetUserId: fromId, action }) });
+      showMsg(action === "accept" ? "🤝 配对成功！" : "已拒绝");
+      load();
+    } catch {}
+  };
+
+  const loadChat = async (partnerId) => {
+    try { const d = await getMessages(partnerId); setChatMessages(d.messages || []); } catch {}
+  };
+
+  const openChat = async (partner) => {
+    setChatPartner(partner);
+    await loadChat(partner.id);
+    setTimeout(() => { chatBoxRef.current?.scrollTo({ top: chatBoxRef.current.scrollHeight, behavior: "smooth" }); }, 100);
+  };
+
+  const handleSendMessage = async () => {
+    if (!chatInput.trim() || !chatPartner) return;
+    setSending(true);
+    try {
+      await sendMessage(chatPartner.id, chatInput.trim());
+      setChatInput("");
+      await loadChat(chatPartner.id);
+      setTimeout(() => { chatBoxRef.current?.scrollTo({ top: chatBoxRef.current.scrollHeight, behavior: "smooth" }); }, 100);
+    } catch { alert("发送失败"); }
+    setSending(false);
+  };
+
+  useEffect(() => {
+    if (!chatPartner) return;
+    const interval = setInterval(async () => {
+      try {
+        const msgs = await getMessages(chatPartner.id);
+        chatMessagesRef.current = msgs.messages || [];
+        setChatMessages(msgs.messages || []);
+      } catch {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [chatPartner]);
+
+  const refreshUsers = async () => {
+    setRefreshing(true);
+    await new Promise(r => setTimeout(r, 1000));
+    await load();
+    setRefreshing(false);
+  };
+
+  const matchedIds = new Set(pairs.map(p => p.otherUser?.id).filter(Boolean));
+  const sentPending = pairs.filter(p => p.status === "pending" && p.fromId === user?.id);
+  const receivedPending = pendingReqs;
+  const pendingTargetIds = new Set([...pairs.filter(p => p.status === "pending" && p.fromId === user?.id).map(p => p.toId), ...pendingReqs.map(p => p.fromId)]);
+
+  let displayUsers = allUsers.filter(u => u.id !== user?.id);
+  if (filter === "new") displayUsers = displayUsers.sort(() => Math.random() - 0.5).slice(0, 5);
+  else if (filter === "night") displayUsers = displayUsers.filter((_, i) => i % 3 === 0);
+  displayUsers = displayUsers.slice(0, 30);
+
+  const globeUsers = allUsers.filter(u => u.id !== user?.id).slice(0, 20);
+
+  if (loading) return <div className="dashboard"><div className="spinner" /></div>;
+
+  const getStatusBadge = (u, idx) => {
+    if (idx < 3 && filter !== "night") return { label:"🔥 新上线", color:"#e74c3c" };
+    if (idx % 3 === 1) return { label:"🌙 夜猫子", color:"#a8b8d4" };
+    return null;
+  };
+
+  const getSignature = (u) => {
+    return "正在寻找同频的旅人 🌊";
+  };
+
+  return (
+    <div className="dashboard">
+      <header className="dh"><div className="dh-in"><a href="/dashboard" className="dh-brand"><Logo size={20} showText={false} /></a><div className="d-nav"><a href="/dashboard"><span>🚢</span><span className="nav-label">登船口</span></a><a href="/checkin"><span>⚓</span><span className="nav-label">航海日志</span></a><a href="/community"><span>🍃</span><span className="nav-label">低语台</span></a><a href="/treehole"><span>🍾</span><span className="nav-label">漂流瓶</span></a><a href="/skills"><span>🏮</span><span className="nav-label">互助港湾</span></a><a href="/capsule"><span>🌊</span><span className="nav-label">时间海</span></a><a href="/buddy" className="active"><span>👥</span><span className="nav-label">觅舟友</span></a><a href="/notifications" style={{color:"rgba(255,255,255,.35)",fontSize:".85rem",textDecoration:"none",padding:"6px 6px",borderRadius:"8px",transition:"all .2s",fontFamily:"inherit",whiteSpace:"nowrap"}} onMouseEnter={e=>e.target.style.color="rgba(255,255,255,.7)"} onMouseLeave={e=>e.target.style.color="rgba(255,255,255,.35)"}>🔔</a><a href="/profile" style={{color:"rgba(255,255,255,.35)",fontSize:".85rem",textDecoration:"none",padding:"6px 6px",borderRadius:"8px",transition:"all .2s",fontFamily:"inherit",whiteSpace:"nowrap"}} onMouseEnter={e=>e.target.style.color="rgba(255,255,255,.7)"} onMouseLeave={e=>e.target.style.color="rgba(255,255,255,.35)"}>👤</a><button onClick={()=>{localStorage.removeItem("token");window.location.href="/"}} style={{background:"none",border:"none",color:"rgba(255,255,255,.35)",fontSize:".75rem",cursor:"pointer",padding:"6px 10px",borderRadius:"8px",transition:"all .2s",fontFamily:"inherit",whiteSpace:"nowrap"}} onmouseenter={e=>e.target.style.color="rgba(255,255,255,.7)"} onmouseleave={e=>e.target.style.color="rgba(255,255,255,.35)"}>退出</button></div></div></header>
+      <div className="db">
+        <div style={{marginBottom:"20px"}}>
+          <h1 className="db-title" style={{marginBottom:"8px"}}>👥 同在渡口 · 觅舟友</h1>
+          <p style={{fontSize:".82rem",color:"var(--text-light)",marginBottom:0}}>
+            🌍 <strong>{onlineCount}</strong> 位正在渡口的旅人 · 实时更新
+          </p>
+          <p style={{fontSize:".75rem",color:"var(--text-muted)",marginTop:"4px"}}>
+            他们此刻可能在咖啡馆、深夜地铁，或正准备出发
+          </p>
+        </div>
+
+        {msg && (
+          <div style={{padding:"10px 18px",background:"var(--warm-glow-dim)",border:"1px solid var(--warm-glow)",borderRadius:"12px",textAlign:"center",marginBottom:"16px"}}>
+            <p style={{fontSize:".85rem",color:"var(--warm-glow)"}}>{msg}</p>
+          </div>
+        )}
+
+        <div style={{display:"flex",alignItems:"center",gap:"8px",marginBottom:"16px",cursor:"pointer"}}
+          onClick={() => { if (sentPending.length === 0 && receivedPending.length === 0) { showMsg("📬 还没有配对请求，试试向一位旅人发出邀请吧"); } else { setShowPendingModal(true); } }}>
+          {sentPending.length > 0 ? (
+            <span style={{fontSize:".82rem",color:"var(--text-light)",padding:"8px 14px",background:"var(--cream)",borderRadius:"40px"}}>
+              💌 已发送 <strong>{sentPending.length}</strong> 个配对请求 · 等待回应中 🕰️
+            </span>
+          ) : (
+            <span style={{fontSize:".82rem",color:"var(--text-muted)",padding:"8px 14px",background:"var(--cream)",borderRadius:"40px"}}>
+              📬 你还没发出邀请？试试向一位旅人递出第一封信
+            </span>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:"8px",flexWrap:"wrap",marginBottom:"20px"}}>
+          <button onClick={()=>setFilter("all")} className="btn btn--sm" style={{fontSize:".78rem",padding:"5px 14px",borderRadius:"40px",background:filter==="all"?"var(--warm-glow)":"var(--cream)",color:filter==="all"?"var(--night)":"var(--text-light)",border:"none",cursor:"pointer",fontFamily:"inherit"}}>🌊 全部</button>
+          <button onClick={()=>setFilter("new")} className="btn btn--sm" style={{fontSize:".78rem",padding:"5px 14px",borderRadius:"40px",background:filter==="new"?"var(--warm-glow)":"var(--cream)",color:filter==="new"?"var(--night)":"var(--text-light)",border:"none",cursor:"pointer",fontFamily:"inherit"}}>✨ 新上线</button>
+          <button onClick={()=>setFilter("night")} className="btn btn--sm" style={{fontSize:".78rem",padding:"5px 14px",borderRadius:"40px",background:filter==="night"?"var(--warm-glow)":"var(--cream)",color:filter==="night"?"var(--night)":"var(--text-light)",border:"none",cursor:"pointer",fontFamily:"inherit"}}>🌙 夜间活跃</button>
+        </div>
+
+        <div style={{marginBottom:"24px"}}>
+          <Globe users={globeUsers} size={Math.min(300, typeof window !== "undefined" ? window.innerWidth - 60 : 300)} />
+        </div>
+
+        <div style={{display:"flex",flexDirection:"column",gap:"10px",marginBottom:"20px"}}>
+          {receivedPending.length > 0 && (
+            <div style={{marginBottom:"8px"}}>
+              <p style={{fontSize:".85rem",fontWeight:600,color:"var(--warm-glow)",marginBottom:"8px"}}>📩 有 {receivedPending.length} 位旅人向你发送了配对请求</p>
+              {receivedPending.slice(0, 3).map(p => (
+                <div key={p.id||p.fromId} className="card card--tight" style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"8px"}}>
+                  <span style={{fontSize:".88rem",color:"var(--night)"}}>👤 {p.fromUser?.username || "渡口居民"}</span>
+                  <div style={{display:"flex",gap:"6px"}}>
+                    <button onClick={()=>respondPair(p.fromId, "accept")} className="btn btn--primary btn--sm" style={{fontSize:".72rem",padding:"4px 12px"}}>✅ 接受</button>
+                    <button onClick={()=>respondPair(p.fromId, "reject")} className="btn btn--ghost btn--sm" style={{fontSize:".72rem",padding:"4px 12px"}}>拒绝</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <p style={{fontSize:".85rem",fontWeight:500,color:"var(--text-light)",marginBottom:"4px"}}>🌊 渡口的旅人们</p>
+
+          {displayUsers.length === 0 ? (
+            <div className="card" style={{textAlign:"center",padding:"40px 24px"}}>
+              <p style={{fontSize:"2rem",marginBottom:"8px",opacity:.4}}>🌊</p>
+              <p style={{fontSize:".88rem",color:"var(--text-muted)"}}>还没有其他旅人<br/>再等等，会有人来的</p>
+            </div>
+          ) : (
+            displayUsers.map((u, idx) => {
+              const isMatched = matchedIds.has(u.id);
+              const isPending = pendingTargetIds.has(u.id);
+              const badge = getStatusBadge(u, idx);
+              const sig = getSignature(u);
+              return (
+                <div key={u.id} className="card card--tight" style={{display:"flex",alignItems:"center",gap:"12px",padding:"14px 18px",transition:"all .2s"}}>
+                  <div style={{width:"38px",height:"38px",borderRadius:"50%",flexShrink:0,overflow:"hidden",display:"flex",alignItems:"center",justifyContent:"center",background:"linear-gradient(135deg,#f0c27f,#dba76a)"}}>
+                    {u.avatar?.startsWith("data:") || u.avatar?.startsWith("http") ? (
+                      <img src={u.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} />
+                    ) : (
+                      <span style={{fontSize:"1.1rem"}}>{u.avatar || "👤"}</span>
+                    )}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:"6px",marginBottom:"2px"}}>
+                      <span style={{fontSize:".9rem",fontWeight:500,color:"var(--night)"}}>{u.username || "渡口居民"}</span>
+                      {badge && (
+                        <span style={{fontSize:".65rem",padding:"1px 8px",borderRadius:"40px",background:badge.color+"22",color:badge.color}}>{badge.label}</span>
+                      )}
+                    </div>
+                    <p style={{fontSize:".78rem",color:"var(--text-muted)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{sig}</p>
+                  </div>
+                  <div style={{flexShrink:0}}>
+                    {isMatched ? (
+                      <div style={{display:"flex",gap:"6px",alignItems:"center"}}>
+                        <span style={{fontSize:".75rem",color:"var(--warm-glow)"}}>🤝 已结伴</span>
+                        <button onClick={()=>openChat(u)} className="btn btn--sm" style={{fontSize:".7rem",padding:"3px 10px",background:"var(--cream)",border:"none",borderRadius:"40px",cursor:"pointer",color:"var(--text-light)",fontFamily:"inherit"}}>💬</button>
+                      </div>
+                    ) : isPending ? (
+                      <span style={{fontSize:".75rem",color:"var(--text-muted)"}}>⏳ 等待中</span>
+                    ) : (
+                      <button onClick={()=>sendPair(u.id)} className="btn btn--warm btn--sm" style={{fontSize:".75rem",padding:"5px 14px",borderRadius:"40px",transition:"all .2s",}}>💌 配对</button>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <div style={{position:"fixed",bottom:"80px",right:"24px",zIndex:999}}>
+          <button onClick={refreshUsers} disabled={refreshing} className="btn" style={{width:"50px",height:"50px",borderRadius:"50%",background:"linear-gradient(135deg,#f0c27f,#dba76a)",border:"none",color:"#1a1a2e",fontSize:"1.2rem",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 4px 16px rgba(240,194,127,.3)",transition:"all .3s",animation:refreshing?"spin 1s linear infinite":"none"}}
+            onMouseEnter={e=>e.currentTarget.style.transform="scale(1.1)"}
+            onMouseLeave={e=>e.currentTarget.style.transform=""}
+          >➕</button>
+        </div>
+
+        <div style={{position:"fixed",bottom:"24px",right:"24px",zIndex:999,display:"flex",alignItems:"center",gap:"8px",background:"rgba(26,26,46,.85)",backdropFilter:"blur(12px)",padding:"10px 18px",borderRadius:"40px",border:"1px solid rgba(240,194,127,.12)",boxShadow:"0 4px 20px rgba(0,0,0,.2)",cursor:"pointer",transition:"all .3s ease"}} onMouseEnter={e=>{e.currentTarget.style.transform="translateY(-4px)";e.currentTarget.style.boxShadow="0 8px 30px rgba(0,0,0,.3)"}} onMouseLeave={e=>{e.currentTarget.style.transform="";e.currentTarget.style.boxShadow="0 4px 20px rgba(0,0,0,.2)"}}>
+          <span className="online-dot" style={{width:"10px",height:"10px"}} />
+          <span style={{fontSize:".82rem",color:"rgba(250,246,240,.6)"}}>在线 <strong style={{color:"var(--warm-glow)",fontWeight:700}}>{onlineCount + Math.floor(Math.random()*5)}</strong> 人</span>
+        </div>
+
+        {showPendingModal && (
+          <div onClick={()=>setShowPendingModal(false)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(26,26,46,.6)",backdropFilter:"blur(6px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center",}}>
+            <div style={{background:"var(--white)",borderRadius:"var(--radius)",padding:"24px",maxWidth:"420px",width:"90%",maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,.2)"}} onClick={e=>e.stopPropagation()}>
+              <h3 style={{fontSize:"1rem",fontWeight:600,color:"var(--night)",marginBottom:"16px"}}>💌 我的配对请求</h3>
+              {sentPending.length === 0 && receivedPending.length === 0 ? (
+                <p style={{textAlign:"center",color:"var(--text-muted)",padding:"20px 0"}}>还没有任何配对请求</p>
+              ) : (
+                <>
+                  {sentPending.length > 0 && (
+                    <div style={{marginBottom:"14px"}}>
+                      <p style={{fontSize:".82rem",fontWeight:500,color:"var(--text-light)",marginBottom:"8px"}}>已发送 ({sentPending.length})</p>
+                      {sentPending.map(p => (
+                        <div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:"1px solid #f0f0f0"}}>
+                          <span style={{fontSize:".85rem",color:"var(--text)"}}>👤 {p.otherUser?.username || "渡口居民"}</span>
+                          <span style={{fontSize:".78rem",color:"var(--text-muted)"}}>⏳ 待回应</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {receivedPending.length > 0 && (
+                    <div>
+                      <p style={{fontSize:".82rem",fontWeight:500,color:"var(--warm-glow)",marginBottom:"8px"}}>收到的请求 ({receivedPending.length})</p>
+                      {receivedPending.slice(0, 5).map(p => (
+                        <div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f0f0f0"}}>
+                          <span style={{fontSize:".85rem",color:"var(--text)"}}>👤 {(p.fromUser?.username) || "渡口居民"}</span>
+                          <div style={{display:"flex",gap:"6px"}}>
+                            <button onClick={()=>respondPair(p.fromId,"accept")} className="btn btn--primary btn--sm" style={{fontSize:".7rem",padding:"3px 10px"}}>接受</button>
+                            <button onClick={()=>respondPair(p.fromId,"reject")} className="btn btn--ghost btn--sm" style={{fontSize:".7rem",padding:"3px 10px"}}>拒绝</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              <button onClick={()=>setShowPendingModal(false)} className="btn btn--ghost btn--block" style={{marginTop:"16px",fontSize:".85rem"}}>关闭</button>
+            </div>
+          </div>
+        )}
+
+        {/* Chat modal - floating window */}
+        {chatPartner && (
+          <div onClick={()=>setChatPartner(null)} style={{position:"fixed",top:0,left:0,right:0,bottom:0,background:"rgba(26,26,46,.5)",backdropFilter:"blur(4px)",zIndex:1000,display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <div onClick={e=>e.stopPropagation()} style={{background:"var(--white)",borderRadius:"var(--radius)",maxWidth:"500px",width:"90%",maxHeight:"80vh",display:"flex",flexDirection:"column",boxShadow:"0 20px 60px rgba(0,0,0,.2)",}}>
+              <div style={{display:"flex",alignItems:"center",gap:"10px",padding:"16px 20px 0 20px"}}>
+                <div style={{width:"30px",height:"30px",borderRadius:"50%",overflow:"hidden",flexShrink:0,background:"linear-gradient(135deg,#f0c27f,#dba76a)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:".9rem"}}>
+                  {chatPartner.avatar?.startsWith("data:")||chatPartner.avatar?.startsWith("http")?(<img src={chatPartner.avatar} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}} />):<span>{chatPartner.avatar||"👤"}</span>}
+                </div>
+                <span style={{fontSize:".88rem",fontWeight:600,color:"var(--night)",flex:1}}>{chatPartner.username||"渡口居民"}</span>
+                <button onClick={()=>setChatPartner(null)} style={{background:"var(--cream)",border:"none",fontSize:".9rem",cursor:"pointer",color:"var(--text-light)",width:"26px",height:"26px",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}} onMouseEnter={e=>{e.target.style.background="var(--cream-dim)"}} onMouseLeave={e=>{e.target.style.background="var(--cream)"}}>x</button>
+              </div>
+              <div ref={chatBoxRef} style={{flex:1,overflowY:"auto",margin:"12px 20px",padding:"12px",background:"var(--cream)",borderRadius:"var(--radius-sm)",minHeight:"120px",maxHeight:"40vh",scrollBehavior:"smooth"}}>
+                {chatMessages.length === 0 ? (
+                  <p style={{textAlign:"center",color:"var(--text-muted)",padding:"30px 0",fontSize:".85rem",margin:0}}>还没有消息，打个招呼吧 🌿</p>
+                ) : (
+                  chatMessages.map(m => {
+                    const isMe = m.fromUserId === user?.id;
+                    return (
+                      <div key={m.id} style={{display:"flex",flexDirection:"column",alignItems:isMe?"flex-end":"flex-start",marginBottom:"10px"}}>
+                        <div style={{maxWidth:"80%",padding:"10px 16px",borderRadius:isMe?"18px 18px 4px 18px":"18px 18px 18px 4px",background:isMe?"var(--warm-glow)":"var(--white)",color:"var(--text)",fontSize:".88rem",lineHeight:"1.6",boxShadow:"0 1px 4px rgba(0,0,0,.06)",wordBreak:"break-word"}}>
+                          <p style={{margin:0,color:"var(--text)"}}>{m.content}</p>
+                          <p style={{fontSize:".6rem",opacity:.4,marginTop:"6px",textAlign:isMe?"right":"left",marginBottom:0,color:"var(--text-muted)"}}>{m.created_at?.slice(11,16)}</p>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+              <div style={{display:"flex",gap:"8px",padding:"0 20px 16px 20px"}}>
+                <input className="input" style={{flex:1,fontSize:".85rem",padding:"10px 14px",color:"var(--text)",background:"var(--cream)",border:"1px solid var(--border)",borderRadius:"10px",fontFamily:"inherit"}} placeholder="输入消息..." value={chatInput} onChange={e=>setChatInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();handleSendMessage()}}} />
+                <button onClick={handleSendMessage} disabled={sending||!chatInput.trim()} className="btn btn--primary btn--sm" style={{flexShrink:0,padding:"10px 18px",fontSize:".85rem"}}>{sending?"发送中...":"发送"}</button>
+              </div>
+            </div>
+          </div>
+        )}
+    </div>
+  );
+}
