@@ -1,60 +1,36 @@
 const https = require("https");
 
-// Supabase config
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://obzebmboykfsodovrrnw.supabase.co";
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9iemVibWJveWtmc29kb3Zycm53Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNDEwODEsImV4cCI6MjA5NTkxNzA4MX0.FUGgcK4iZc7lm7I9oSVMcDcxMX0MTimUFFG4iSLMEuo";
 
-// In-memory cache
-var cache = null;
-var cacheDirty = {};
-
-// Table name mapping (JS property -> Supabase table)
 const TABLE_MAP = {
-  users: "users",
-  checkIns: "checkins",
-  posts: "posts",
-  comments: "comments",
-  treeholes: "treeholes",
-  reactions: "reactions",
-  skills: "skills",
-  timeCapsules: "time_capsules",
-  messages: "messages",
-  shownEncouragements: "encouragements",
-  pairs: "pairs",
-  userLocations: "user_locations",
-  notifications: "notifications",
-  bottles: "treeholes",
-  bottleReplies: "bottle_replies",
-  bottlePickLogs: "bottle_pick_logs",
+  users: "users", checkIns: "checkins", posts: "posts", comments: "comments",
+  treeholes: "treeholes", reactions: "reactions", skills: "skills",
+  timeCapsules: "time_capsules", messages: "messages",
+  shownEncouragements: "encouragements", pairs: "pairs",
+  userLocations: "user_locations", notifications: "notifications",
 };
 
-// Reverse: supabase table -> js property
-const TABLE_REVERSE = {};
-for (var k in TABLE_MAP) TABLE_REVERSE[TABLE_MAP[k]] = k;
+var cache = null;
+var loading = false;
+var loadQueue = [];
 
 function supabaseApi(method, table, body, params) {
-  return new Promise(function(resolve, reject) {
+  return new Promise(function (resolve, reject) {
     var path = "/rest/v1/" + table;
     if (params) path += "?" + params;
-    
-    var opts = {
+    var req = https.request({
       hostname: SUPABASE_URL.replace("https://", ""),
-      path: path,
-      method: method,
+      path: path, method: method,
       headers: {
-        "apikey": SUPABASE_KEY,
-        "Authorization": "Bearer " + SUPABASE_KEY,
-        "Content-Type": "application/json",
-        "Prefer": "return=representation"
+        "apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY,
+        "Content-Type": "application/json", "Prefer": "return=representation"
       }
-    };
-    
-    var req = https.request(opts, function(r) {
+    }, function (r) {
       var d = "";
-      r.on("data", function(c) { d += c; });
-      r.on("end", function() {
-        try { resolve(JSON.parse(d)); }
-        catch(e) { resolve(d ? [d] : []); }
+      r.on("data", function (c) { d += c; });
+      r.on("end", function () {
+        try { resolve(JSON.parse(d)); } catch (e) { resolve(d ? [d] : []); }
       });
     });
     req.on("error", reject);
@@ -63,83 +39,77 @@ function supabaseApi(method, table, body, params) {
   });
 }
 
-function getDb() {
-  // If cache exists and not dirty, return it
-  if (cache) return cache;
-  
-  // Initialize empty db structure
+function initCache() {
   cache = {
-    users: [], checkIns: [], posts: [], comments: [],
-    treeholes: [], reactions: [], skills: [], timeCapsules: [],
-    messages: [], shownEncouragements: [], pairs: [],
-    userLocations: [], notifications: [],
-    bottles: [], bottleReplies: [], bottlePickLogs: []
+    users: [], checkIns: [], posts: [], comments: [], treeholes: [],
+    reactions: [], skills: [], timeCapsules: [], messages: [],
+    shownEncouragements: [], pairs: [], userLocations: [], notifications: []
   };
-  
-  // Schedule async load from Supabase
-  loadAllFromSupabase();
-  
+}
+
+function getDb() {
+  if (cache) return cache;
+  initCache();
+  if (!loading) {
+    loading = true;
+    supabaseApi("GET", "users", null, "select=*").then(function (d) {
+      if (Array.isArray(d)) cache.users = d;
+      return supabaseApi("GET", "checkins", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.checkIns = d;
+      return supabaseApi("GET", "posts", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.posts = d;
+      return supabaseApi("GET", "comments", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.comments = d;
+      return supabaseApi("GET", "treeholes", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.treeholes = d;
+      return supabaseApi("GET", "reactions", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.reactions = d;
+      return supabaseApi("GET", "skills", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.skills = d;
+      return supabaseApi("GET", "time_capsules", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.timeCapsules = d;
+      return supabaseApi("GET", "messages", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.messages = d;
+      return supabaseApi("GET", "encouragements", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.shownEncouragements = d;
+      return supabaseApi("GET", "pairs", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.pairs = d;
+      return supabaseApi("GET", "user_locations", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.userLocations = d;
+      return supabaseApi("GET", "notifications", null, "select=*");
+    }).then(function (d) {
+      if (Array.isArray(d)) cache.notifications = d;
+      loading = false;
+    });
+  }
   return cache;
-}
-
-function loadAllFromSupabase() {
-  var tables = Object.keys(TABLE_MAP).filter(function(k) { return k === TABLE_REVERSE[TABLE_MAP[k]]; });
-  var loaded = 0;
-  
-  tables.forEach(function(prop) {
-    var table = TABLE_MAP[prop];
-    supabaseApi("GET", table, null, "select=*").then(function(data) {
-      if (Array.isArray(data) && cache) {
-        cache[prop] = data;
-        // Also handle bottle aliases
-        if (prop === "treeholes") {
-          cache.bottles = data;
-        }
-      }
-      loaded++;
-    }).catch(function(err) {
-      loaded++;
-    });
-  });
-}
-
-// Track what needs to be saved
-var pendingSave = null;
-
-function scheduleSave() {
-  if (pendingSave) return;
-  pendingSave = setTimeout(function() {
-    pendingSave = null;
-    flushToSupabase();
-  }, 100);
-}
-
-function flushToSupabase() {
-  if (!cache) return;
-  
-  var tables = Object.keys(TABLE_MAP).filter(function(k) { return k === TABLE_REVERSE[TABLE_MAP[k]]; });
-  
-  tables.forEach(function(prop) {
-    var table = TABLE_MAP[prop];
-    var data = cache[prop];
-    
-    // Delete all and re-insert
-    supabaseApi("DELETE", table, null, "limit=100000").then(function() {
-      if (data && data.length > 0) {
-        // Insert in batches of 50
-        var batchSize = 50;
-        for (var i = 0; i < data.length; i += batchSize) {
-          var batch = data.slice(i, i + batchSize);
-          supabaseApi("POST", table, batch);
-        }
-      }
-    });
-  });
 }
 
 function saveDb(data) {
   cache = data;
-  scheduleSave();
+  var tables = Object.keys(TABLE_MAP);
+  tables.forEach(function (prop) {
+    var table = TABLE_MAP[prop];
+    var rows = data[prop] || [];
+    supabaseApi("DELETE", table, null, "limit=100000").then(function () {
+      if (rows.length > 0) {
+        for (var i = 0; i < rows.length; i += 50) {
+          supabaseApi("POST", table, rows.slice(i, i + 50));
+        }
+      }
+    });
+  });
 }
 
 function makeId(prefix) {
