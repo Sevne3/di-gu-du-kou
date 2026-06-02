@@ -1,8 +1,9 @@
-﻿import "./globals.css";
+import "./globals.css";
 import Script from "next/script";
 import ThemeErrorBoundary from "@/components/ThemeErrorBoundary"
 import ThemeProvider from "@/components/ThemeProvider";
 import ClientLayout from "@/components/ClientLayout";
+import { Analytics } from "@vercel/analytics/next";
 
 export const metadata = {
   title: "低谷渡口—你不是一个人",
@@ -21,6 +22,7 @@ export default function RootLayout({ children }) {
         <ThemeProvider><ThemeErrorBoundary><ClientLayout>
           <div className="page-wrap">{children}</div>
         </ClientLayout></ThemeErrorBoundary></ThemeProvider>
+        <Analytics />
       </body>
     </html>
   );
