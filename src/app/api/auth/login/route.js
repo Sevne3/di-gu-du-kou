@@ -9,6 +9,9 @@ export async function POST(req) {
     const user = db.users.find(u => u.email === email);
     if (!user) {
       return Response.json({ error: "邮箱或密码错误" }, { status: 401 });
+if (!user.emailVerified) {
+  return Response.json({ error: "请先验证邮箱再登录，检查你的收件箱或重新发送验证邮件" }, { status: 403 });
+}
     }
     const match = await bcrypt.compare(password, user.password);
     if (!match) {
